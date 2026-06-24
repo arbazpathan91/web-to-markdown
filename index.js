@@ -7,17 +7,36 @@ const app = express();
 const port = process.env.PORT || 3000;
 const turndownService = new TurndownService();
 
-// Health check route
+// Set up the API Key (This will pull from Render's secure environment variables)
+// If no variable is found, it defaults to a test key.
+const VALID_API_KEY = process.env.API_KEY || 'simpaira_demo_key';
+
+// Security Middleware
+const authenticateKey = (req, res, next) => {
+    // Check for the key in headers (for RapidAPI) or query string (for easy mobile testing)
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+
+    if (!apiKey || apiKey !== VALID_API_KEY) {
+        return res.status(401).json({ 
+            success: false,
+            error: 'Unauthorized', 
+            message: 'A valid API key is required.' 
+        });
+    }
+    next();
+};
+
+// Health check route (Unprotected so monitoring tools can ping it)
 app.get('/', (req, res) => {
-    res.json({ status: 'Active', message: 'Use /api/extract?url=YOUR_URL' });
+    res.json({ status: 'Active', message: 'Service is running securely.' });
 });
 
-// Main extraction route
-app.get('/api/extract', async (req, res) => {
+// Main extraction route (Protected by authenticateKey)
+app.get('/api/extract', authenticateKey, async (req, res) => {
     const { url } = req.query;
     
     if (!url) {
-        return res.status(400).json({ error: 'Missing url parameter.' });
+        return res.status(400).json({ success: false, error: 'Missing url parameter.' });
     }
 
     try {
@@ -27,7 +46,7 @@ app.get('/api/extract', async (req, res) => {
         
         const $ = cheerio.load(response.data);
         
-        // Remove non-content elements to ensure clean data
+        // Strip out non-content tags for lean data
         $('script, style, noscript, nav, footer, header, aside, iframe').remove();
         
         const markdown = turndownService.turndown($.html());
@@ -39,7 +58,7 @@ app.get('/api/extract', async (req, res) => {
         });
         
     } catch (error) {
-        res.status(500).json({ error: 'Extraction failed', details: error.message });
+        res.status(500).json({ success: false, error: 'Extraction failed', details: error.message });
     }
 });
 
